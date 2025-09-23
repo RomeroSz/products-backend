@@ -1,0 +1,16 @@
+﻿[project]
+name = "products-backend"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Victor Romero",email = "victor.romero@sudeaseg.gob.ve"}
+]
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
