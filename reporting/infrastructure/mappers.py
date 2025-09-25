@@ -1,0 +1,1 @@
+﻿# reporting infra mappers (stub)

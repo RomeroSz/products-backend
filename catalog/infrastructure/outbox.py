@@ -1,0 +1,1 @@
+﻿# catalog infra outbox (stub)

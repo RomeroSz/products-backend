@@ -1,0 +1,1 @@
+﻿# workflow domain entities (stub)

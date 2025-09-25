@@ -1,0 +1,1 @@
+﻿# advertising infra mappers (stub)

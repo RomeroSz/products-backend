@@ -1,0 +1,1 @@
+﻿# accounting infra outbox (stub)

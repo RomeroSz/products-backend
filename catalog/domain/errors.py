@@ -1,0 +1,1 @@
+﻿# catalog domain errors (stub)

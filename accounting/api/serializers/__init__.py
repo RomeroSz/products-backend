@@ -1,0 +1,1 @@
+﻿# accounting api serializers (stub)

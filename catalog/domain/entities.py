@@ -1,0 +1,1 @@
+﻿# catalog domain entities (stub)

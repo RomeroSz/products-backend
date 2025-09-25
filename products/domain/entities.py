@@ -1,0 +1,1 @@
+﻿# products domain entities (stub)

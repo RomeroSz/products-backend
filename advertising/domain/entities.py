@@ -1,0 +1,1 @@
+﻿# advertising domain entities (stub)

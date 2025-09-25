@@ -1,0 +1,1 @@
+﻿# catalog application DTOs (stub)

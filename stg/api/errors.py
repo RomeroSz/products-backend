@@ -1,0 +1,1 @@
+﻿# stg api errors (stub)

@@ -1,0 +1,1 @@
+﻿# products application DTOs (stub)

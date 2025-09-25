@@ -1,0 +1,1 @@
+﻿# reporting domain services (stub)

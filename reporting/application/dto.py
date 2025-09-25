@@ -1,0 +1,1 @@
+﻿# reporting application DTOs (stub)

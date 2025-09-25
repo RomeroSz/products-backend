@@ -1,0 +1,1 @@
+﻿# accounting domain entities (stub)

@@ -1,0 +1,1 @@
+﻿# stg infra tasks (stub)

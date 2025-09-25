@@ -1,0 +1,1 @@
+﻿# Exceptions mapping (stub)

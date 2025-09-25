@@ -1,0 +1,1 @@
+﻿# audit domain entities (stub)

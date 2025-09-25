@@ -1,0 +1,1 @@
+﻿# advertising application DTOs (stub)

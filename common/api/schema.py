@@ -1,0 +1,1 @@
+﻿# OpenAPI helpers (stub)

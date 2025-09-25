@@ -1,0 +1,1 @@
+﻿# accounting api errors (stub)

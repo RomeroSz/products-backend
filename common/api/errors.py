@@ -1,0 +1,1 @@
+﻿# common api errors (stub)

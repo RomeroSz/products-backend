@@ -1,0 +1,1 @@
+﻿# accounting application DTOs (stub)

@@ -1,0 +1,1 @@
+﻿# stg infra outbox (stub)

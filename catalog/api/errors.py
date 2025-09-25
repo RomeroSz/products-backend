@@ -1,0 +1,1 @@
+﻿# catalog api errors (stub)

@@ -1,0 +1,1 @@
+﻿# incentives domain entities (stub)

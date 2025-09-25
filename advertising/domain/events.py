@@ -1,0 +1,1 @@
+﻿# advertising domain events (stub)

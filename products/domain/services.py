@@ -1,0 +1,1 @@
+﻿# products domain services (stub)

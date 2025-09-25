@@ -1,0 +1,1 @@
+﻿# stg domain errors (stub)

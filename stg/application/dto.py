@@ -1,0 +1,1 @@
+﻿# stg application DTOs (stub)

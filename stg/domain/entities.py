@@ -1,0 +1,1 @@
+﻿# stg domain entities (stub)

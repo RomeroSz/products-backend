@@ -45,14 +45,25 @@ INSTALLED_APPS = [
     # Colas
     "django_rq",
     # Apps de dominio (vacías por ahora)
-    "apps.core",
-    "apps.documents",
-    "apps.actuarial",
-    "apps.workflow",
-    "apps.commissions",
-    "apps.reinsurance",
-    "apps.catalog",
-    "apps.auditlog",
+]
+
+INSTALLED_APPS += [
+    # Core util
+    "common",
+    # Dominios
+    "security",
+    "catalog",
+    "products",
+    "expediente",
+    "workflow",
+    "incentives",
+    "advertising",
+    "accounting",
+    "stg",
+    "audit",
+    "reporting",
+    # Infra notificaciones/correo
+    "notifications",
 ]
 
 # --- Middleware ---
@@ -111,6 +122,16 @@ DATABASES = {
     },
 }
 
+EMAIL_BACKEND = env(
+    "EMAIL_BACKEND", default="django.core.mail.backends.console.EmailBackend"
+)
+EMAIL_HOST = env("EMAIL_HOST", default="")
+EMAIL_PORT = env.int("EMAIL_PORT", default=587)
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
+EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="SUDEASEG <no-reply@sudeaseg>")
+
 # --- Autenticación y permisos ---
 AUTHENTICATION_BACKENDS = (
     "django.contrib.auth.backends.ModelBackend",
@@ -140,6 +161,12 @@ if env.bool("USE_S3", default=False):
 # --- CORS ---
 CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL", default=True)
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
+
+# Inserta ActorContextMiddleware justo después de AuthenticationMiddleware
+_auth_idx = MIDDLEWARE.index("django.contrib.auth.middleware.AuthenticationMiddleware")
+MIDDLEWARE.insert(
+    _auth_idx + 1, "common.middleware.actor_context.ActorContextMiddleware"
+)
 
 # --- Cache (Redis) ---
 CACHES = {
@@ -192,6 +219,7 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "API SUDEASEG (backend-only)",
     "VERSION": "0.1.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    "SERVE_PERMISSIONS": ["rest_framework.permissions.IsAuthenticated"],
 }
 
 # --- Logs (JSON-friendly) ---

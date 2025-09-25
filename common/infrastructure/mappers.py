@@ -1,0 +1,1 @@
+﻿# common infra mappers (stub)

@@ -1,0 +1,1 @@
+﻿# advertising api serializers (stub)

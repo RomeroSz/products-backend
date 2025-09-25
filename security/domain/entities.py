@@ -1,0 +1,1 @@
+﻿# security domain entities (stub)

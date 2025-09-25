@@ -1,0 +1,1 @@
+﻿# products infra outbox (stub)
