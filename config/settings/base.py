@@ -111,6 +111,9 @@ DATABASES = {
         "PASSWORD": env("DB_PASSWORD", default="postgres"),
         "HOST": env("DB_HOST", default="localhost"),
         "PORT": env("DB_PORT", default="5432"),
+        "OPTIONS": {
+            "options": "-c search_path=public,core,catalog,link,workflow,audit,security,stg,reporting"
+        },
     },
     "geo_db": {
         "ENGINE": "django.db.backends.postgresql",
@@ -120,6 +123,21 @@ DATABASES = {
         "HOST": env("DB_HOST", default="localhost"),
         "PORT": env("DB_PORT", default="5432"),
     },
+}
+
+MIGRATION_MODULES = {
+    "security": None,
+    "catalog": None,
+    "products": None,
+    "expediente": None,
+    "workflow": None,
+    "incentives": None,
+    "advertising": None,
+    "accounting": None,
+    "stg": None,
+    "audit": None,
+    "reporting": None,
+    "notifications": None,
 }
 
 EMAIL_BACKEND = env(
