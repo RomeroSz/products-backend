@@ -76,6 +76,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "common.middleware.actor_context.ActorContextMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django_prometheus.middleware.PrometheusAfterMiddleware",
@@ -112,7 +113,7 @@ DATABASES = {
         "HOST": env("DB_HOST", default="localhost"),
         "PORT": env("DB_PORT", default="5432"),
         "OPTIONS": {
-            "options": "-c search_path=public,core,catalog,link,workflow,audit,security,stg,reporting"
+            "options": "-c search_path=public,security,core,catalog,link,workflow,audit,stg,reporting"
         },
     },
     "geo_db": {
@@ -179,12 +180,6 @@ if env.bool("USE_S3", default=False):
 # --- CORS ---
 CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL", default=True)
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
-
-# Inserta ActorContextMiddleware justo después de AuthenticationMiddleware
-_auth_idx = MIDDLEWARE.index("django.contrib.auth.middleware.AuthenticationMiddleware")
-MIDDLEWARE.insert(
-    _auth_idx + 1, "common.middleware.actor_context.ActorContextMiddleware"
-)
 
 # --- Cache (Redis) ---
 CACHES = {

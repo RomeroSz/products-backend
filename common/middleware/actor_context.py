@@ -1,4 +1,7 @@
-﻿from django.utils.deprecation import MiddlewareMixin
+﻿# common/middleware/actor_context.py
+from django.conf import settings
+from django.db import connection
+from django.utils.deprecation import MiddlewareMixin
 
 
 class ActorContextMiddleware(MiddlewareMixin):
@@ -9,25 +12,38 @@ class ActorContextMiddleware(MiddlewareMixin):
         request.actor_id = None
         request.company_id = None
 
-        # 0) Headers de prueba (opcionales)
-        aid = request.META.get(self.header_actor)
-        cid = request.META.get(self.header_company)
-        if aid:
-            request.actor_id = aid
-        if cid:
-            request.company_id = cid
+        # 0) Headers de prueba solo en DEBUG
+        if getattr(settings, "DEBUG", False):
+            aid = request.META.get(self.header_actor)
+            cid = request.META.get(self.header_company)
+            if aid:
+                request.actor_id = aid
+            if cid:
+                request.company_id = cid
 
-        # 1) Resolución real desde UserLink (si hay usuario autenticado)
-        if getattr(request, "user", None) and request.user.is_authenticated:
-            try:
-                from security.infrastructure.models import UserLink
+        # 1) Si el usuario está autenticado: setear contexto RLS y resolver actor/company
+        user = getattr(request, "user", None)
+        if not (user and user.is_authenticated):
+            return None
 
-                link = UserLink.objects.select_related("actor").get(user=request.user)
-                request.actor_id = str(link.actor_id)
-                request.company_id = (
-                    str(link.actor.company_id) if link.actor.company_id else None
-                )
-            except Exception:
-                pass
+        with connection.cursor() as cur:
+            # Cargar contexto de sesión para RLS/funciones
+            cur.execute('SELECT "security".set_context_from_user(%s)', [user.id])
+
+            # Resolver actor y compañía en un solo roundtrip
+            cur.execute(
+                """
+                SELECT a.id::text, a.company_id::text
+                FROM "security".user_link ul
+                JOIN "security".actor a ON a.id = ul.actor_id
+                WHERE ul.user_id = %s
+                LIMIT 1
+            """,
+                [user.id],
+            )
+            row = cur.fetchone()
+
+        if row:
+            request.actor_id, request.company_id = row[0], row[1]
 
         return None
