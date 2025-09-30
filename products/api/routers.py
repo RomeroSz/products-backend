@@ -1,17 +1,22 @@
 ﻿from django.urls import path
-
-from products.api.views.product_create import ProductCreateView
-from products.api.views.version_lifecycle import (VersionPublishView,
-                                                  VersionValidateView)
+from products.api.views.wizard_start import WizardStartView
+from products.api.views.wizard_docs import AttachCGView, AttachCPView, AttachAnnexView, AttachFormatView
+from products.api.views.wizard_ra import WizardRAView
+from products.api.views.wizard_validate_publish import WizardValidateView, WizardSubmitView
+from products.api.views.wizard_status import WizardStatusView
 
 urlpatterns = [
-    path("products/", ProductCreateView.as_view(), name="product-create"),
-    path(
-        "versions/<uuid:vp_id>/validate",
-        VersionValidateView.as_view(),
-        name="vp-validate",
-    ),
-    path(
-        "versions/<uuid:vp_id>/publish", VersionPublishView.as_view(), name="vp-publish"
-    ),
+    path("wizard/products/start", WizardStartView.as_view(), name="wizard-start"),
+    path("wizard/docs/cg", AttachCGView.as_view(), name="wizard-docs-cg"),
+    path("wizard/docs/cp", AttachCPView.as_view(), name="wizard-docs-cp"),
+    path("wizard/docs/annex", AttachAnnexView.as_view(), name="wizard-docs-annex"),
+    path("wizard/docs/format", AttachFormatView.as_view(),
+         name="wizard-docs-format"),
+    path("wizard/ra", WizardRAView.as_view(), name="wizard-ra"),
+    path("wizard/<uuid:case_id>/validate",
+         WizardValidateView.as_view(), name="wizard-validate"),
+    path("wizard/<uuid:case_id>/submit",
+         WizardSubmitView.as_view(), name="wizard-submit"),
+    path("wizard/<uuid:case_id>/status",
+         WizardStatusView.as_view(), name="wizard-status"),
 ]

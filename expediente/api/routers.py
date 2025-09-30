@@ -1,9 +1,7 @@
-﻿from django.urls import include, path
-from rest_framework.routers import DefaultRouter
-
-# Router vacÃ­o por ahora (evita 404 en include)
-router = DefaultRouter()
+﻿from django.urls import path
+from expediente.api.views.tree import CaseTreeView
 
 urlpatterns = [
-    path("", include(router.urls)),
+    path("expediente/<uuid:product_case_id>/tree",
+         CaseTreeView.as_view(), name="case-tree"),
 ]
