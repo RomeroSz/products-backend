@@ -1,4 +1,3 @@
-from typing import Optional, List, Dict, Any
 from rest_framework import serializers
 
 
@@ -10,13 +9,9 @@ class WizardStartSerializer(serializers.Serializer):
     ramos_actuariales = serializers.ListField(
         child=serializers.UUIDField(), min_length=1
     )
-    ramos_contables = serializers.ListField(
-        child=serializers.UUIDField(), min_length=1
-    )
-    monedas = serializers.ListField(
-        child=serializers.UUIDField(), min_length=1)
-    modalidades = serializers.ListField(
-        child=serializers.UUIDField(), min_length=1)
+    ramos_contables = serializers.ListField(child=serializers.UUIDField(), min_length=1)
+    monedas = serializers.ListField(child=serializers.UUIDField(), min_length=1)
+    modalidades = serializers.ListField(child=serializers.UUIDField(), min_length=1)
 
 
 # ---------- DOCS (CG/CP/ANNEX/FORMAT) ----------
@@ -50,7 +45,8 @@ class ItemCPSerializer(ItemWithRamoSerializer):
 class ItemAnnexSerializer(ItemWithRamoSerializer):
     genera_prima = serializers.BooleanField(required=False, default=False)
     tipo = serializers.CharField(
-        max_length=64, required=False, allow_blank=True, allow_null=True)
+        max_length=64, required=False, allow_blank=True, allow_null=True
+    )
 
 
 class ItemFormatSerializer(ItemBaseSerializer):
@@ -58,8 +54,7 @@ class ItemFormatSerializer(ItemBaseSerializer):
 
 
 class LinkSerializer(serializers.Serializer):
-    estado = serializers.CharField(
-        max_length=32, required=False, default="VIGENTE")
+    estado = serializers.CharField(max_length=32, required=False, default="VIGENTE")
     vigencia_desde = serializers.DateField(required=False, allow_null=True)
     vigencia_hasta = serializers.DateField(required=False, allow_null=True)
 
@@ -68,7 +63,8 @@ class LinkSerializer(serializers.Serializer):
         h = attrs.get("vigencia_hasta")
         if d and h and h < d:
             raise serializers.ValidationError(
-                "vigencia_hasta no puede ser menor a vigencia_desde")
+                "vigencia_hasta no puede ser menor a vigencia_desde"
+            )
         return attrs
 
 
@@ -112,7 +108,8 @@ class RAInputSerializer(serializers.Serializer):
         h = attrs.get("vigencia_hasta")
         if d and h and h < d:
             raise serializers.ValidationError(
-                "vigencia_hasta no puede ser menor a vigencia_desde")
+                "vigencia_hasta no puede ser menor a vigencia_desde"
+            )
         return attrs
 
 
@@ -121,8 +118,7 @@ class RACreateSerializer(serializers.Serializer):
     product_id = serializers.UUIDField()
     ra = RAInputSerializer()
     enlaces = serializers.DictField(
-        child=serializers.ListField(child=serializers.UUIDField()),
-        required=False
+        child=serializers.ListField(child=serializers.UUIDField()), required=False
     )
 
 
@@ -141,5 +137,6 @@ class SubmitSerializer(serializers.Serializer):
         h = attrs.get("vigencia_hasta")
         if h and h < d:
             raise serializers.ValidationError(
-                "vigencia_hasta no puede ser menor a vigencia_desde")
+                "vigencia_hasta no puede ser menor a vigencia_desde"
+            )
         return attrs

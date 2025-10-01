@@ -1,13 +1,14 @@
-from rest_framework.views import APIView
+from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework.views import APIView
+
 from common.application.db import set_db_context_from_request
 from products.api.serializers.doc_attach import attach_document_to_version
-from products.api.serializers.wizard import (
-    AttachDocCGSerializer, AttachDocCPSerializer,
-    AttachDocAnnexSerializer, AttachDocFormatSerializer
-)
+from products.api.serializers.wizard import (AttachDocAnnexSerializer,
+                                             AttachDocCGSerializer,
+                                             AttachDocCPSerializer,
+                                             AttachDocFormatSerializer)
 
 
 class _BaseAttachView(APIView):
@@ -28,12 +29,15 @@ class _BaseAttachView(APIView):
             item=v["item"],
             link=v["link"],
         )
-        return Response({
-            "link_id": res.link_id,
-            "document_id": res.document_id,
-            "specific_id": res.specific_id,
-            "case_id": res.case_id,
-        }, status=status.HTTP_201_CREATED)
+        return Response(
+            {
+                "link_id": res.link_id,
+                "document_id": res.document_id,
+                "specific_id": res.specific_id,
+                "case_id": res.case_id,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class AttachCGView(_BaseAttachView):
