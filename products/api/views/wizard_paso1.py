@@ -23,8 +23,9 @@ def validate_ramo_path(path_ids, modalidades):
     with connection.cursor() as cur:
         for pid in path_ids:
             cur.execute("""
-                SELECT id, type, code, name, enabled, parent_id, level, meta
-                FROM catalog_item WHERE id=%s
+                SELECT id, item_type AS type, code, name, is_active AS enabled,
+                       parent_id, depth AS level, attrs AS meta
+                FROM catalog.item WHERE id=%s
             """, [pid])
             row = cur.fetchone()
             if not row:

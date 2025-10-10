@@ -26,9 +26,9 @@ def r_to_node(r):
 def fetch_ramo_items():
     q = """
     SELECT id, type, code, name, enabled, parent_id, level, meta
-    FROM catalog_item
-    WHERE type IN ('RAMO_TAX','RAMO') AND enabled=true
-    ORDER BY COALESCE((meta->>'ord')::int, 999), name
+    FROM catalog.item
+    WHERE item_type IN ('RAMO_TAX','RAMO') AND is_active=true
+    ORDER BY COALESCE((attrs->>'ord')::int, 999), name
     """
     with connection.cursor() as cur:
         cur.execute(q)
@@ -74,18 +74,18 @@ class RamosChildrenView(APIView):
         if pid:
             q = """
             SELECT id, type, code, name, enabled, parent_id, level, meta
-            FROM catalog_item
-            WHERE enabled=true AND type IN ('RAMO_TAX','RAMO') AND parent_id=%s
-            ORDER BY COALESCE((meta->>'ord')::int, 999), name
+            FROM catalog.item
+            WHERE is_active=true AND item_type IN ('RAMO_TAX','RAMO') AND parent_id=%s
+            ORDER BY COALESCE((attrs->>'ord')::int, 999), name
             """
             params = [pid]
         else:
             # raíces (N1)
             q = """
             SELECT id, type, code, name, enabled, parent_id, level, meta
-            FROM catalog_item
-            WHERE enabled=true AND type='RAMO_TAX' AND (level=1 OR parent_id IS NULL)
-            ORDER BY COALESCE((meta->>'ord')::int, 999), name
+            FROM catalog.item
+            WHERE is_active=true AND item_type='RAMO_TAX' AND (depth=1 OR parent_id IS NULL)
+            ORDER BY COALESCE((attrs->>'ord')::int, 999), name
             """
             params = []
         with connection.cursor() as cur:
@@ -98,7 +98,7 @@ def load_item_by_id(item_id):
     with connection.cursor() as cur:
         cur.execute("""
             SELECT id, type, code, name, enabled, parent_id, level, meta
-            FROM catalog_item WHERE id=%s
+            FROM catalog.item WHERE id=%s
         """, [item_id])
         row = cur.fetchone()
     return row_to_dict(row) if row else None
@@ -171,7 +171,7 @@ class RamosValidatePathView(APIView):
             for pid in path_ids:
                 cur.execute("""
                     SELECT id, type, code, name, enabled, parent_id, level, meta
-                    FROM catalog_item WHERE id=%s
+                    FROM catalog.item WHERE id=%s
                 """, [pid])
                 row = cur.fetchone()
                 if not row:
@@ -234,14 +234,14 @@ class RamosResolveCodesView(APIView):
             for code in path_codes:
                 if parent:
                     cur.execute("""
-                        SELECT id FROM catalog_item
+                        SELECT id FROM catalog.item
                         WHERE enabled=true AND code=%s AND parent_id=%s
                         LIMIT 1
                     """, [code, parent])
                 else:
                     # primer nivel puede no tener parent (RAMO_TAX raíz)
                     cur.execute("""
-                        SELECT id FROM catalog_item
+                        SELECT id FROM catalog.item
                         WHERE enabled=true AND code=%s
                         ORDER BY level ASC
                         LIMIT 1
@@ -267,7 +267,7 @@ class RamosMultiRulesView(APIView):
     def get(self, request):
         q = """
         SELECT id, code, name, meta
-        FROM catalog_item
+        FROM catalog.item
         WHERE enabled=true AND type IN ('RAMO_TAX','RAMO')
         """
         with connection.cursor() as cur:
@@ -294,9 +294,9 @@ class ModalidadesListView(APIView):
     def get(self, request):
         q = """
         SELECT id, type, code, name, enabled, parent_id, level, meta
-        FROM catalog_item
+        FROM catalog.item
         WHERE type='MODALIDAD' AND enabled=true
-        ORDER BY COALESCE((meta->>'ord')::int, 999), name
+        ORDER BY COALESCE((attrs->>'ord')::int, 999), name
         """
         with connection.cursor() as cur:
             cur.execute(q)

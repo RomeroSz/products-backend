@@ -42,25 +42,26 @@ class CatalogItemsListView(APIView):
 
     def get(self, request):
         q = """
-        SELECT id, type, code, name, enabled, parent_id, level, meta
-        FROM catalog_item
+        SELECT id, item_type AS type, code, name, is_active AS enabled,
+               parent_id, depth AS level, attrs AS meta
+        FROM catalog.item
         WHERE 1=1
         """
         params = []
         if (typ := request.GET.get("type")):
-            q += " AND type=%s"
+            q += " AND item_type=%s"
             params.append(typ)
         if (pid := request.GET.get("parent_id")):
             q += " AND parent_id=%s"
             params.append(pid)
         if (lvl := request.GET.get("level")):
-            q += " AND level=%s"
+            q += " AND depth=%s"
             params.append(int(lvl))
         if (enabled := request.GET.get("enabled")):
-            q += " AND enabled=%s"
-            params.append(enabled.lower() in ("1", "true", "t", "yes", "y"))
+            q += " AND is_active=%s"
+            params.append(enabled.lower() in ("1","true","t","yes","y"))
 
-        q += " ORDER BY COALESCE((meta->>'ord')::int, 999), name"
+        q += " ORDER BY COALESCE((attrs->>'ord')::int, 999), name"
 
         limit = int(request.GET.get("limit", 200))
         offset = int(request.GET.get("offset", 0))
@@ -83,8 +84,9 @@ class CatalogItemByIdView(APIView):
 
     def get(self, request, item_id):
         q = """
-        SELECT id, type, code, name, enabled, parent_id, level, meta
-        FROM catalog_item WHERE id=%s
+        SELECT id, item_type AS type, code, name, is_active AS enabled,
+           parent_id, depth AS level, attrs AS meta
+        FROM catalog.item WHERE id=%s
         """
         with connection.cursor() as cur:
             cur.execute(q, [item_id])
@@ -115,17 +117,18 @@ class CatalogItemsSearchView(APIView):
             return Response({"detail": "q requerido"}, status=400)
 
         q = """
-        SELECT id, type, code, name, enabled, parent_id, level, meta
-        FROM catalog_item
+        SELECT id, item_type AS type, code, name, is_active AS enabled,
+           parent_id, depth AS level, attrs AS meta
+        FROM catalog.item
         WHERE (code ILIKE %s OR name ILIKE %s)
         """
         params = [f"%{term}%", f"%{term}%"]
 
         if (typ := request.GET.get("type")):
-            q += " AND type=%s"
+            q += " AND item_type=%s"
             params.append(typ)
-
-        q += " ORDER BY COALESCE((meta->>'ord')::int, 999), name"
+    
+        q += " ORDER BY COALESCE((attrs->>'ord')::int, 999), name"
 
         limit = int(request.GET.get("limit", 100))
         offset = int(request.GET.get("offset", 0))
