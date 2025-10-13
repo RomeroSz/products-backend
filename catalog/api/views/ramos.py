@@ -4,12 +4,24 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter
 from django.db import connection
-import json
+import re
 
+# Tipos válidos para el árbol de ramos
 RAMO_TYPES = ("RAMO_TAX", "RAMO")
 
 
+# ==========================
+# Utilidades
+# ==========================
+UUID_RX = re.compile(r"^[0-9a-fA-F-]{32,36}$")
+
+
+def is_uuid(s: str | None) -> bool:
+    return bool(s) and bool(UUID_RX.match(str(s)))
+
+
 def r_to_node(r):
+    """Mapea una fila ya aliaseada al contrato JSON amigable."""
     return {
         "id": r[0],
         "type": r[1],
@@ -23,9 +35,27 @@ def r_to_node(r):
     }
 
 
+def row_to_dict(r):
+    return {
+        "id": r[0],
+        "type": r[1],
+        "code": r[2],
+        "name": r[3],
+        "enabled": r[4],
+        "parent_id": r[5],
+        "level": r[6],
+        "meta": r[7],
+    }
+
+
+# ==========================
+# Selectores SQL
+# ==========================
+
 def fetch_ramo_items():
     q = """
-    SELECT id, type, code, name, enabled, parent_id, level, meta
+    SELECT id, item_type AS type, code, name, is_active AS enabled,
+           parent_id, depth AS level, attrs AS meta
     FROM catalog.item
     WHERE item_type IN ('RAMO_TAX','RAMO') AND is_active=true
     ORDER BY COALESCE((attrs->>'ord')::int, 999), name
@@ -34,6 +64,25 @@ def fetch_ramo_items():
         cur.execute(q)
         return cur.fetchall()
 
+
+def load_item_by_id(item_id):
+    with connection.cursor() as cur:
+        cur.execute(
+            """
+            SELECT id, item_type AS type, code, name, is_active AS enabled,
+                   parent_id, depth AS level, attrs AS meta
+            FROM catalog.item
+            WHERE id=%s
+            """,
+            [item_id],
+        )
+        row = cur.fetchone()
+    return row_to_dict(row) if row else None
+
+
+# ==========================
+# Lógica de árbol y validaciones
+# ==========================
 
 def build_tree(rows):
     nodes = [r_to_node(r) for r in rows]
@@ -49,8 +98,37 @@ def build_tree(rows):
     return roots
 
 
-@extend_schema(tags=["Catalog · Ramos"], operation_id="catalog_ramos_tree",
-               responses={200: OpenApiResponse(description="Árbol completo N1→N5")})
+def is_multi(meta, code, name):
+    """Reglas de multiselección (meta.multi, asterisco en name, o patrones por familia)."""
+    m = meta or {}
+    if m.get("multi") is True:
+        return True
+    if name and "*" in name:
+        return True
+    patterns = ("AP_IND", "AP_COL", "AP_OCV", "RC_VEH", "AUTO_CAS")
+    return any(code and p in code for p in patterns)
+
+
+def requires_level5(path_items):
+    """Determina si un path exige llegar a N5 (subcategoría y/o modalidad)."""
+    codes = [it["code"] for it in path_items if it]
+    meta = [it["meta"] or {} for it in path_items if it]
+    needs = any(c in ("TRANS", "RTECN", "COMB", "AUTO_CAS", "RC_VEH")
+                for c in codes)
+    if any(m.get("cg") is True for m in meta):
+        needs = True
+    return needs
+
+
+# ==========================
+# Vistas
+# ==========================
+
+@extend_schema(
+    tags=["Catalog · Ramos"],
+    operation_id="catalog_ramos_tree",
+    responses={200: OpenApiResponse(description="Árbol completo N1→N5")},
+)
 class RamosTreeView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -72,8 +150,11 @@ class RamosChildrenView(APIView):
     def get(self, request):
         pid = request.GET.get("parent_id")
         if pid:
+            if not is_uuid(pid):
+                return Response({"detail": "parent_id inválido (uuid)"}, status=400)
             q = """
-            SELECT id, type, code, name, enabled, parent_id, level, meta
+            SELECT id, item_type AS type, code, name, is_active AS enabled,
+                   parent_id, depth AS level, attrs AS meta
             FROM catalog.item
             WHERE is_active=true AND item_type IN ('RAMO_TAX','RAMO') AND parent_id=%s
             ORDER BY COALESCE((attrs->>'ord')::int, 999), name
@@ -82,7 +163,8 @@ class RamosChildrenView(APIView):
         else:
             # raíces (N1)
             q = """
-            SELECT id, type, code, name, enabled, parent_id, level, meta
+            SELECT id, item_type AS type, code, name, is_active AS enabled,
+                   parent_id, depth AS level, attrs AS meta
             FROM catalog.item
             WHERE is_active=true AND item_type='RAMO_TAX' AND (depth=1 OR parent_id IS NULL)
             ORDER BY COALESCE((attrs->>'ord')::int, 999), name
@@ -92,53 +174,6 @@ class RamosChildrenView(APIView):
             cur.execute(q, params)
             rows = cur.fetchall()
         return Response([r_to_node(r) for r in rows])
-
-
-def load_item_by_id(item_id):
-    with connection.cursor() as cur:
-        cur.execute("""
-            SELECT id, type, code, name, enabled, parent_id, level, meta
-            FROM catalog.item WHERE id=%s
-        """, [item_id])
-        row = cur.fetchone()
-    return row_to_dict(row) if row else None
-
-
-def row_to_dict(r):
-    return {
-        "id": r[0], "type": r[1], "code": r[2], "name": r[3],
-        "enabled": r[4], "parent_id": r[5], "level": r[6], "meta": r[7]
-    }
-
-
-def is_multi(meta, code, name):
-    # Reglas de multiselección (las que marcaste con *) o por meta
-    m = meta or {}
-    if m.get("multi") is True:
-        return True
-    if name and "*" in name:
-        return True
-    # también por familia común
-    patterns = ("AP_IND", "AP_COL", "AP_OCV", "RC_VEH", "AUTO_CAS")
-    return any(code and p in code for p in patterns)
-
-
-def requires_level5(path_items):
-    """
-    Determina si un path requiere llegar a N5 (p.ej. Transporte y combinaciones que exigen subrama y/o modalidad).
-    Sugerencia: derivar por code meta.cg (cuando hay subcategorías obligatorias)
-    """
-    codes = [it["code"] for it in path_items if it]
-    meta = [it["meta"] or {} for it in path_items if it]
-    # ejemplo: Transporte (TRANS) y Ramos Técnicos (RTECN) tienen subniveles obligatorios (N4)
-    needs = any(
-        c in ("TRANS", "RTECN", "COMB", "AUTO_CAS", "RC_VEH")
-        for c in codes
-    )
-    # si hay meta.cg y hay hijos, exigir descender
-    if any(m.get("cg") is True for m in meta):
-        needs = True
-    return needs
 
 
 @extend_schema(
@@ -164,15 +199,22 @@ class RamosValidatePathView(APIView):
 
         if not isinstance(path_ids, list) or not path_ids:
             return Response({"ok": False, "error": "path_ids requerido"}, status=400)
+        if not all(is_uuid(pid) for pid in path_ids):
+            return Response({"ok": False, "error": "path_ids debe contener UUIDs"}, status=400)
 
         # Cargar todos los nodos del path (en orden)
         items = []
         with connection.cursor() as cur:
             for pid in path_ids:
-                cur.execute("""
-                    SELECT id, type, code, name, enabled, parent_id, level, meta
-                    FROM catalog.item WHERE id=%s
-                """, [pid])
+                cur.execute(
+                    """
+                    SELECT id, item_type AS type, code, name, is_active AS enabled,
+                           parent_id, depth AS level, attrs AS meta
+                    FROM catalog.item
+                    WHERE id=%s
+                    """,
+                    [pid],
+                )
                 row = cur.fetchone()
                 if not row:
                     return Response({"ok": False, "error": f"id inválido: {pid}"}, status=400)
@@ -197,13 +239,15 @@ class RamosValidatePathView(APIView):
         if is_multi(leaf["meta"], leaf["code"], leaf["name"]) and not modalidades:
             return Response({"ok": False, "error": "Selecciona al menos una modalidad (IND/COL/...)."}, status=400)
 
-        return Response({
-            "ok": True,
-            "leaf": leaf,
-            "levels": [it["level"] for it in items],
-            "codes": [it["code"] for it in items],
-            "requires_modalidad": is_multi(leaf["meta"], leaf["code"], leaf["name"]),
-        })
+        return Response(
+            {
+                "ok": True,
+                "leaf": leaf,
+                "levels": [it["level"] for it in items],
+                "codes": [it["code"] for it in items],
+                "requires_modalidad": is_multi(leaf["meta"], leaf["code"], leaf["name"]),
+            }
+        )
 
 
 @extend_schema(
@@ -211,10 +255,8 @@ class RamosValidatePathView(APIView):
     operation_id="catalog_ramos_resolve_codes",
     request={
         "type": "object",
-        "properties": {
-            "path_codes": {"type": "array", "items": {"type": "string"}, "minItems": 1}
-        },
-        "required": ["path_codes"]
+        "properties": {"path_codes": {"type": "array", "items": {"type": "string"}, "minItems": 1}},
+        "required": ["path_codes"],
     },
     responses={200: OpenApiResponse(
         description="Convierte path por code → ids con validación padre→hijo")},
@@ -233,19 +275,28 @@ class RamosResolveCodesView(APIView):
         with connection.cursor() as cur:
             for code in path_codes:
                 if parent:
-                    cur.execute("""
-                        SELECT id FROM catalog.item
-                        WHERE enabled=true AND code=%s AND parent_id=%s
+                    cur.execute(
+                        """
+                        SELECT id
+                        FROM catalog.item
+                        WHERE is_active=true AND item_type IN ('RAMO_TAX','RAMO')
+                              AND code=%s AND parent_id=%s
                         LIMIT 1
-                    """, [code, parent])
+                        """,
+                        [code, parent],
+                    )
                 else:
                     # primer nivel puede no tener parent (RAMO_TAX raíz)
-                    cur.execute("""
-                        SELECT id FROM catalog.item
-                        WHERE enabled=true AND code=%s
-                        ORDER BY level ASC
+                    cur.execute(
+                        """
+                        SELECT id
+                        FROM catalog.item
+                        WHERE is_active=true AND item_type IN ('RAMO_TAX','RAMO') AND code=%s
+                        ORDER BY depth ASC
                         LIMIT 1
-                    """, [code])
+                        """,
+                        [code],
+                    )
                 row = cur.fetchone()
                 if not row:
                     return Response({"error": f"code no resolvible en secuencia: {code}"}, status=400)
@@ -259,16 +310,16 @@ class RamosResolveCodesView(APIView):
     tags=["Catalog · Ramos"],
     operation_id="catalog_ramos_multi_rules",
     responses={200: OpenApiResponse(
-        description="Nodos que permiten multiselección (por meta o patrón)")}
+        description="Nodos que permiten multiselección (por meta o patrón)")},
 )
 class RamosMultiRulesView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         q = """
-        SELECT id, code, name, meta
+        SELECT id, code, name, attrs AS meta
         FROM catalog.item
-        WHERE enabled=true AND type IN ('RAMO_TAX','RAMO')
+        WHERE is_active=true AND item_type IN ('RAMO_TAX','RAMO')
         """
         with connection.cursor() as cur:
             cur.execute(q)
@@ -293,15 +344,25 @@ class ModalidadesListView(APIView):
 
     def get(self, request):
         q = """
-        SELECT id, type, code, name, enabled, parent_id, level, meta
+        SELECT id, item_type AS type, code, name, is_active AS enabled,
+               parent_id, depth AS level, attrs AS meta
         FROM catalog.item
-        WHERE type='MODALIDAD' AND enabled=true
+        WHERE item_type='MODALIDAD' AND is_active=true
         ORDER BY COALESCE((attrs->>'ord')::int, 999), name
         """
         with connection.cursor() as cur:
             cur.execute(q)
             rows = cur.fetchall()
-        return Response([{
-            "id": r[0], "type": r[1], "code": r[2], "name": r[3],
-            "enabled": r[4], "parent_id": r[5], "level": r[6], "meta": r[7],
-        } for r in rows])
+        return Response([
+            {
+                "id": r[0],
+                "type": r[1],
+                "code": r[2],
+                "name": r[3],
+                "enabled": r[4],
+                "parent_id": r[5],
+                "level": r[6],
+                "meta": r[7],
+            }
+            for r in rows
+        ])

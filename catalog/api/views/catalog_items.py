@@ -7,6 +7,12 @@ from django.db import connection
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter
 
 
+# Contrato JSON "amigable" (alias a columnas reales):
+#  - item_type   -> type
+#  - is_active   -> enabled
+#  - depth       -> level
+#  - attrs       -> meta
+
 def row_to_item(r):
     return {
         "id": r[0],
@@ -24,8 +30,12 @@ def row_to_item(r):
     tags=["Catalog"],
     operation_id="catalog_items_list",
     parameters=[
-        OpenApiParameter("type", str, required=False,
-                         description="Filtra por tipo (RAMO_TAX, RAMO, MODALIDAD, MONEDA, etc.)"),
+        OpenApiParameter(
+            "type",
+            str,
+            required=False,
+            description="Filtra por tipo (RAMO_TAX, RAMO, MODALIDAD, MONEDA, etc.)",
+        ),
         OpenApiParameter("parent_id", str, required=False,
                          description="Filtra por padre UUID"),
         OpenApiParameter("level", int, required=False,
@@ -48,6 +58,7 @@ class CatalogItemsListView(APIView):
         WHERE 1=1
         """
         params = []
+
         if (typ := request.GET.get("type")):
             q += " AND item_type=%s"
             params.append(typ)
@@ -56,15 +67,22 @@ class CatalogItemsListView(APIView):
             params.append(pid)
         if (lvl := request.GET.get("level")):
             q += " AND depth=%s"
-            params.append(int(lvl))
+            try:
+                params.append(int(lvl))
+            except ValueError:
+                return Response({"detail": "level debe ser entero"}, status=400)
         if (enabled := request.GET.get("enabled")):
             q += " AND is_active=%s"
-            params.append(enabled.lower() in ("1","true","t","yes","y"))
+            params.append(enabled.lower() in ("1", "true", "t", "yes", "y"))
 
         q += " ORDER BY COALESCE((attrs->>'ord')::int, 999), name"
 
-        limit = int(request.GET.get("limit", 200))
-        offset = int(request.GET.get("offset", 0))
+        try:
+            limit = int(request.GET.get("limit", 200))
+            offset = int(request.GET.get("offset", 0))
+        except ValueError:
+            return Response({"detail": "limit/offset deben ser enteros"}, status=400)
+
         q += " LIMIT %s OFFSET %s"
         params += [limit, offset]
 
@@ -85,8 +103,9 @@ class CatalogItemByIdView(APIView):
     def get(self, request, item_id):
         q = """
         SELECT id, item_type AS type, code, name, is_active AS enabled,
-           parent_id, depth AS level, attrs AS meta
-        FROM catalog.item WHERE id=%s
+               parent_id, depth AS level, attrs AS meta
+        FROM catalog.item
+        WHERE id=%s
         """
         with connection.cursor() as cur:
             cur.execute(q, [item_id])
@@ -118,7 +137,7 @@ class CatalogItemsSearchView(APIView):
 
         q = """
         SELECT id, item_type AS type, code, name, is_active AS enabled,
-           parent_id, depth AS level, attrs AS meta
+               parent_id, depth AS level, attrs AS meta
         FROM catalog.item
         WHERE (code ILIKE %s OR name ILIKE %s)
         """
@@ -127,11 +146,15 @@ class CatalogItemsSearchView(APIView):
         if (typ := request.GET.get("type")):
             q += " AND item_type=%s"
             params.append(typ)
-    
+
         q += " ORDER BY COALESCE((attrs->>'ord')::int, 999), name"
 
-        limit = int(request.GET.get("limit", 100))
-        offset = int(request.GET.get("offset", 0))
+        try:
+            limit = int(request.GET.get("limit", 100))
+            offset = int(request.GET.get("offset", 0))
+        except ValueError:
+            return Response({"detail": "limit/offset deben ser enteros"}, status=400)
+
         q += " LIMIT %s OFFSET %s"
         params += [limit, offset]
 
