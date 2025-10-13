@@ -1,4 +1,3 @@
-# catalog/api/views/ramos.py
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -85,16 +84,48 @@ def load_item_by_id(item_id):
 # ==========================
 
 def build_tree(rows):
+    """
+    Construye el árbol y luego lo post-procesa para colapsar nodos redundantes.
+    Un nodo 'RAMO_TAX' que solo contiene un hijo de tipo 'RAMO' es colapsado,
+    absorbiendo las propiedades del hijo para convertirse en un nodo hoja seleccionable.
+    """
     nodes = [r_to_node(r) for r in rows]
     by_id = {n["id"]: n for n in nodes}
     roots = []
+
+    # 1. Construcción inicial del árbol
     for n in nodes:
         pid = n["parent_id"]
         if pid and pid in by_id:
             by_id[pid]["children"].append(n)
         else:
-            # Nivel 1 (RAMO_TAX raíz) suele no tener parent
             roots.append(n)
+
+    # 2. Post-procesamiento para colapsar nodos
+    # Usamos una copia de la lista de nodos para iterar mientras modificamos el diccionario `by_id`
+    for node in nodes:
+        # La condición para colapsar:
+        # - El nodo es de tipo RAMO_TAX.
+        # - Tiene exactamente un hijo.
+        # - Ese único hijo es de tipo RAMO.
+        if (
+            node["type"] == "RAMO_TAX"
+            and len(node["children"]) == 1
+            and node["children"][0]["type"] == "RAMO"
+        ):
+            child = node["children"][0]
+
+            # El padre "absorbe" las propiedades clave del hijo.
+            # Esto es CRUCIAL: el frontend ahora enviará el ID y código del RAMO real,
+            # y la validación de nivel funcionará correctamente.
+            node["id"] = child["id"]
+            node["type"] = child["type"]
+            node["code"] = child["code"]
+            node["level"] = child["level"]  # Nivel del hijo para validación
+
+            # Se convierte en una hoja (nodo final)
+            node["children"] = []
+
     return roots
 
 
@@ -134,9 +165,11 @@ class RamosTreeView(APIView):
 
     def get(self, request):
         rows = fetch_ramo_items()
+        # Usamos la función build_tree que ya contiene la corrección
         return Response(build_tree(rows))
 
 
+# ... (el resto del archivo no necesita cambios)
 @extend_schema(
     tags=["Catalog · Ramos"],
     operation_id="catalog_ramos_children",
@@ -248,7 +281,6 @@ class RamosValidatePathView(APIView):
                 "requires_modalidad": is_multi(leaf["meta"], leaf["code"], leaf["name"]),
             }
         )
-
 
 @extend_schema(
     tags=["Catalog · Ramos"],
