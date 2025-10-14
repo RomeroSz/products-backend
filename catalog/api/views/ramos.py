@@ -85,15 +85,16 @@ def load_item_by_id(item_id):
 
 def build_tree(rows):
     """
-    Construye el árbol y luego lo post-procesa para colapsar nodos redundantes.
-    Un nodo 'RAMO_TAX' que solo contiene un hijo de tipo 'RAMO' es colapsado,
-    absorbiendo las propiedades del hijo para convertirse en un nodo hoja seleccionable.
+    Construye un árbol limpio y jerárquico a partir de los datos.
+    1. Construye la estructura inicial.
+    2. PODA: Elimina nodos 'RAMO' que compiten con 'RAMO_TAX' en el mismo nivel.
+    3. COLAPSA: Simplifica nodos 'RAMO_TAX' que solo contienen un único 'RAMO'.
     """
     nodes = [r_to_node(r) for r in rows]
     by_id = {n["id"]: n for n in nodes}
     roots = []
 
-    # 1. Construcción inicial del árbol
+    # Paso 1: Construcción inicial del árbol
     for n in nodes:
         pid = n["parent_id"]
         if pid and pid in by_id:
@@ -101,33 +102,42 @@ def build_tree(rows):
         else:
             roots.append(n)
 
-    # 2. Post-procesamiento para colapsar nodos
-    # Usamos una copia de la lista de nodos para iterar mientras modificamos el diccionario `by_id`
-    for node in nodes:
-        # La condición para colapsar:
-        # - El nodo es de tipo RAMO_TAX.
-        # - Tiene exactamente un hijo.
-        # - Ese único hijo es de tipo RAMO.
+    # Usamos una lista de todos los nodos para las iteraciones de limpieza
+    all_nodes_in_tree = list(by_id.values())
+
+    # Paso 2: Poda de Nodos Paralelos (LA LÓGICA CLAVE QUE SOLICITASTE)
+    # Si un nodo RAMO_TAX tiene hijos que también son RAMO_TAX (subcarpetas),
+    # eliminamos cualquier hijo que sea un RAMO seleccionable (archivo) en ese mismo nivel.
+    # Esto impone una jerarquía estricta.
+    for node in all_nodes_in_tree:
+        if node["type"] == "RAMO_TAX" and node["children"]:
+            # Verificar si existe al menos un hijo de tipo RAMO_TAX
+            has_tax_children = any(c["type"] == "RAMO_TAX" for c in node["children"])
+            
+            if has_tax_children:
+                # Si hay subcategorías, filtramos la lista de hijos para quedarnos
+                # ÚNICAMENTE con las subcategorías. Los 'RAMO' paralelos se eliminan.
+                node["children"] = [c for c in node["children"] if c["type"] == "RAMO_TAX"]
+
+    # Paso 3: Colapso de nodos contenedores redundantes (Lógica anterior, ahora más efectiva)
+    # Esto se ejecuta sobre el árbol ya podado.
+    # Si un RAMO_TAX solo tiene un hijo y es un RAMO, los fusionamos.
+    for node in all_nodes_in_tree:
         if (
             node["type"] == "RAMO_TAX"
             and len(node["children"]) == 1
             and node["children"][0]["type"] == "RAMO"
         ):
             child = node["children"][0]
-
-            # El padre "absorbe" las propiedades clave del hijo.
-            # Esto es CRUCIAL: el frontend ahora enviará el ID y código del RAMO real,
-            # y la validación de nivel funcionará correctamente.
+            # El padre absorbe las propiedades del hijo y se convierte en él
             node["id"] = child["id"]
             node["type"] = child["type"]
             node["code"] = child["code"]
-            node["level"] = child["level"]  # Nivel del hijo para validación
-
-            # Se convierte en una hoja (nodo final)
+            node["level"] = child["level"]
+            # Y se convierte en una hoja final
             node["children"] = []
 
     return roots
-
 
 def is_multi(meta, code, name):
     """Reglas de multiselección (meta.multi, asterisco en name, o patrones por familia)."""
