@@ -4,6 +4,7 @@ from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter
 from django.db import connection
 import re
+import json
 
 # Tipos válidos para el árbol de ramos
 RAMO_TYPES = ("RAMO_TAX", "RAMO")
@@ -89,10 +90,11 @@ def build_tree(rows):
     1. Construye la estructura inicial.
     2. PODA: Elimina nodos 'RAMO' que compiten con 'RAMO_TAX' en el mismo nivel.
     3. COLAPSA: Simplifica nodos 'RAMO_TAX' que solo contienen un único 'RAMO'.
+    4. APLANA: Eleva los hijos del nodo 'GENERALES' al nivel raíz.
     """
     nodes = [r_to_node(r) for r in rows]
     by_id = {n["id"]: n for n in nodes}
-    roots = []
+    initial_roots = []
 
     # Paso 1: Construcción inicial del árbol
     for n in nodes:
@@ -100,28 +102,20 @@ def build_tree(rows):
         if pid and pid in by_id:
             by_id[pid]["children"].append(n)
         else:
-            roots.append(n)
+            initial_roots.append(n)
 
-    # Usamos una lista de todos los nodos para las iteraciones de limpieza
     all_nodes_in_tree = list(by_id.values())
 
-    # Paso 2: Poda de Nodos Paralelos (LA LÓGICA CLAVE QUE SOLICITASTE)
-    # Si un nodo RAMO_TAX tiene hijos que también son RAMO_TAX (subcarpetas),
-    # eliminamos cualquier hijo que sea un RAMO seleccionable (archivo) en ese mismo nivel.
-    # Esto impone una jerarquía estricta.
+    # Paso 2: Poda de Nodos Paralelos
     for node in all_nodes_in_tree:
         if node["type"] == "RAMO_TAX" and node["children"]:
-            # Verificar si existe al menos un hijo de tipo RAMO_TAX
-            has_tax_children = any(c["type"] == "RAMO_TAX" for c in node["children"])
-            
+            has_tax_children = any(
+                c["type"] == "RAMO_TAX" for c in node["children"])
             if has_tax_children:
-                # Si hay subcategorías, filtramos la lista de hijos para quedarnos
-                # ÚNICAMENTE con las subcategorías. Los 'RAMO' paralelos se eliminan.
-                node["children"] = [c for c in node["children"] if c["type"] == "RAMO_TAX"]
+                node["children"] = [c for c in node["children"]
+                                    if c["type"] == "RAMO_TAX"]
 
-    # Paso 3: Colapso de nodos contenedores redundantes (Lógica anterior, ahora más efectiva)
-    # Esto se ejecuta sobre el árbol ya podado.
-    # Si un RAMO_TAX solo tiene un hijo y es un RAMO, los fusionamos.
+    # Paso 3: Colapso de nodos contenedores redundantes
     for node in all_nodes_in_tree:
         if (
             node["type"] == "RAMO_TAX"
@@ -129,18 +123,38 @@ def build_tree(rows):
             and node["children"][0]["type"] == "RAMO"
         ):
             child = node["children"][0]
-            # El padre absorbe las propiedades del hijo y se convierte en él
             node["id"] = child["id"]
             node["type"] = child["type"]
             node["code"] = child["code"]
             node["level"] = child["level"]
-            # Y se convierte en una hoja final
             node["children"] = []
 
-    return roots
+    # Paso 4: Aplanar el nodo "Generales" para elevar sus hijos al nivel raíz
+    final_roots = []
+    for root_node in initial_roots:
+        if root_node.get("code") == "GENERALES":
+            # Si encontramos "Generales", no lo agregamos a la raíz.
+            # En su lugar, extendemos la lista de raíces con sus hijos.
+            final_roots.extend(root_node.get("children", []))
+        else:
+            # Cualquier otro nodo raíz (como "Vida") se agrega directamente.
+            final_roots.append(root_node)
+
+    # Paso 5: (Opcional pero recomendado) Re-ordenar la lista final de raíces
+    # para asegurar que "Vida" aparezca primero, seguido por los hijos de "Generales".
+    def get_order(node):
+        try:
+            meta = json.loads(node.get("meta", '{}') or '{}')
+            return int(meta.get("ord", 999))
+        except (json.JSONDecodeError, ValueError):
+            return 999
+
+    final_roots.sort(key=get_order)
+
+    return final_roots
+
 
 def is_multi(meta, code, name):
-    """Reglas de multiselección (meta.multi, asterisco en name, o patrones por familia)."""
     m = meta or {}
     if m.get("multi") is True:
         return True
@@ -151,7 +165,6 @@ def is_multi(meta, code, name):
 
 
 def requires_level5(path_items):
-    """Determina si un path exige llegar a N5 (subcategoría y/o modalidad)."""
     codes = [it["code"] for it in path_items if it]
     meta = [it["meta"] or {} for it in path_items if it]
     needs = any(c in ("TRANS", "RTECN", "COMB", "AUTO_CAS", "RC_VEH")
@@ -164,7 +177,6 @@ def requires_level5(path_items):
 # ==========================
 # Vistas
 # ==========================
-
 @extend_schema(
     tags=["Catalog · Ramos"],
     operation_id="catalog_ramos_tree",
@@ -175,7 +187,7 @@ class RamosTreeView(APIView):
 
     def get(self, request):
         rows = fetch_ramo_items()
-        # Usamos la función build_tree que ya contiene la corrección
+        # La magia ahora ocurre completamente dentro de build_tree
         return Response(build_tree(rows))
 
 
@@ -291,6 +303,7 @@ class RamosValidatePathView(APIView):
                 "requires_modalidad": is_multi(leaf["meta"], leaf["code"], leaf["name"]),
             }
         )
+
 
 @extend_schema(
     tags=["Catalog · Ramos"],
