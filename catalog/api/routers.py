@@ -12,6 +12,7 @@ from .views.ramos import (
     RamosValidatePathView,
     RamosResolveCodesView,
     RamosMultiRulesView,
+    RamosAllowedModalidadesView,
     ModalidadesListView,
 )
 
@@ -35,6 +36,8 @@ urlpatterns += [
          name="catalog-ramos-resolve-codes"),
     path("catalog/ramos/multi_rules/", RamosMultiRulesView.as_view(),
          name="catalog-ramos-multi-rules"),
+    path("catalog/ramos/allowed_modalidades/", RamosAllowedModalidadesView.as_view(),
+         name="catalog-ramos-allowed-modalidades"),
     path("catalog/modalidades/", ModalidadesListView.as_view(),
          name="catalog-modalidades"),
 ]
