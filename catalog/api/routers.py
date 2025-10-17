@@ -1,5 +1,6 @@
 ﻿# catalog/api/routers.py
 from django.urls import path
+
 from .views.catalog_items import (
     CatalogItemsListView,
     CatalogItemByIdView,
@@ -14,6 +15,12 @@ from .views.ramos import (
     RamosMultiRulesView,
     RamosAllowedModalidadesView,
     ModalidadesListView,
+)
+
+# NUEVO: vistas canónicas de ramos (lista + modalidades por ramo)
+from .views.ramos_canonic import (
+    CatalogRamosListView,
+    RamoModalidadesView,
 )
 
 urlpatterns = [
@@ -40,4 +47,14 @@ urlpatterns += [
          name="catalog-ramos-allowed-modalidades"),
     path("catalog/modalidades/", ModalidadesListView.as_view(),
          name="catalog-modalidades"),
+]
+
+# NUEVO: endpoints canónicos
+urlpatterns += [
+    # Lista de ramos hoja (canónica: sin _IND/_COL, path limpio)
+    path("catalog/ramos/", CatalogRamosListView.as_view(),
+         name="catalog-ramos-list"),
+    # Modalidades por ramo (IND/COL + displayName por attrs.label_col si aplica)
+    path("ramos/<uuid:ramo_id>/modalidades/",
+         RamoModalidadesView.as_view(), name="ramos-modalidades"),
 ]
