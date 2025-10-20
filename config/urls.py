@@ -13,6 +13,7 @@ urlpatterns = [
     # API v1 por dominio (routers vacíos por ahora: no 404)
     path("api/", include("security.api.routers")),
     path("api/", include("catalog.api.routers")),
+    path("api/", include("ramos.api.routers")),
     path("api/", include("products.api.routers")),
     path("api/", include("expediente.api.routers")),
     path("api/", include("workflow.api.routers")),

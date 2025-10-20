@@ -53,6 +53,7 @@ INSTALLED_APPS += [
     # Dominios
     "security",
     "catalog",
+    "ramos",
     "products",
     "expediente",
     "workflow",

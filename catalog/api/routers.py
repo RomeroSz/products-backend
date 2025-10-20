@@ -7,22 +7,6 @@ from .views.catalog_items import (
     CatalogItemsSearchView,
 )
 
-from .views.ramos import (
-    RamosTreeView,
-    RamosChildrenView,
-    RamosValidatePathView,
-    RamosResolveCodesView,
-    RamosMultiRulesView,
-    RamosAllowedModalidadesView,
-    ModalidadesListView,
-)
-
-# NUEVO: vistas canónicas de ramos (lista + modalidades por ramo)
-from .views.ramos_canonic import (
-    CatalogRamosListView,
-    RamoModalidadesView,
-)
-
 urlpatterns = [
     # General (para cualquier tipo de ítem del catálogo)
     path("catalog/items/", CatalogItemsListView.as_view(),
@@ -31,30 +15,4 @@ urlpatterns = [
          CatalogItemByIdView.as_view(), name="catalog-items-by-id"),
     path("catalog/items/search/", CatalogItemsSearchView.as_view(),
          name="catalog-items-search"),
-]
-
-urlpatterns += [
-    path("catalog/ramos/tree/", RamosTreeView.as_view(), name="catalog-ramos-tree"),
-    path("catalog/ramos/children/", RamosChildrenView.as_view(),
-         name="catalog-ramos-children"),
-    path("catalog/ramos/validate_path/", RamosValidatePathView.as_view(),
-         name="catalog-ramos-validate-path"),
-    path("catalog/ramos/resolve_codes/", RamosResolveCodesView.as_view(),
-         name="catalog-ramos-resolve-codes"),
-    path("catalog/ramos/multi_rules/", RamosMultiRulesView.as_view(),
-         name="catalog-ramos-multi-rules"),
-    path("catalog/ramos/allowed_modalidades/", RamosAllowedModalidadesView.as_view(),
-         name="catalog-ramos-allowed-modalidades"),
-    path("catalog/modalidades/", ModalidadesListView.as_view(),
-         name="catalog-modalidades"),
-]
-
-# NUEVO: endpoints canónicos
-urlpatterns += [
-    # Lista de ramos hoja (canónica: sin _IND/_COL, path limpio)
-    path("catalog/ramos/", CatalogRamosListView.as_view(),
-         name="catalog-ramos-list"),
-    # Modalidades por ramo (IND/COL + displayName por attrs.label_col si aplica)
-    path("ramos/<uuid:ramo_id>/modalidades/",
-         RamoModalidadesView.as_view(), name="ramos-modalidades"),
 ]
