@@ -19,32 +19,91 @@ def _ensure_uuid(u: Any) -> str:
     return u.strip()
 
 
-def _fetch_nodes_in_order(path_ids: List[Any]) -> List[Dict[str, Any]]:
-    if not path_ids:
-        raise ValueError("pathIds requerido.")
-    norm_ids = [_ensure_uuid(pid) for pid in path_ids]
-
+def _fetch_node(pid: str) -> Optional[Dict[str, Any]]:
     sql = """
     SELECT id, code, name, level, kind, parent_id, is_active
     FROM ramo.node
     WHERE id = %s
     """
-    items: List[Dict[str, Any]] = []
     with connection.cursor() as cur:
-        for pid in norm_ids:
-            cur.execute(sql, [pid])
-            row = cur.fetchone()
-            if not row:
-                raise ValueError(f"id inválido: {pid}")
+        cur.execute(sql, [pid])
+        row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0], "code": row[1], "name": row[2], "level": int(row[3]),
+        "kind": row[4], "parent_id": row[5], "is_active": bool(row[6]),
+    }
+
+
+def _fetch_modalidad(pid: str) -> Optional[Dict[str, Any]]:
+    """
+    Si pid pertenece a ramo.node_modalidad, devuelve info de modalidad + su parent node.
+    """
+    sql = """
+    SELECT nm.id, m.code, m.name, nm.node_id
+    FROM ramo.node_modalidad nm
+    JOIN ramo.modalidad m ON m.id = nm.modalidad_id
+    WHERE nm.id = %s AND nm.is_enabled = true
+    """
+    with connection.cursor() as cur:
+        cur.execute(sql, [pid])
+        row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0],                    # id de node_modalidad
+        "mod_code": (row[1] or "").upper(),
+        "mod_name": row[2],
+        # id del ramo/option padre en ramo.node
+        "parent_node_id": row[3],
+    }
+
+
+def _fetch_nodes_in_order(path_ids: List[Any]) -> List[Dict[str, Any]]:
+    """
+    Construye la secuencia de elementos del path. El último puede ser:
+      - un nodo real de ramo.node, o
+      - una modalidad (ramo.node_modalidad) representada como OPTION 'virtual'.
+    """
+    if not path_ids:
+        raise ValueError("pathIds requerido.")
+    norm_ids = [_ensure_uuid(pid) for pid in path_ids]
+
+    items: List[Dict[str, Any]] = []
+    for i, pid in enumerate(norm_ids):
+        node = _fetch_node(pid)
+        if node:
+            items.append(node)
+            continue
+
+        # ¿Es una modalidad (leaf virtual)?
+        mod = _fetch_modalidad(pid)
+        if mod:
+            # Validar que haya al menos un item anterior y que el padre coincida
+            if not items:
+                raise ValueError("Path inválido: modalidad sin padre.")
+            if str(items[-1]["id"]) != str(mod["parent_node_id"]):
+                raise ValueError(
+                    "El path no respeta la jerarquía padre→hijo. (400.PATH_BROKEN)")
+
+            # Representamos modalidad como una 'hoja' OPTION virtual
+            parent_level = int(items[-1]["level"])
             items.append({
-                "id": row[0],
-                "code": row[1],
-                "name": row[2],
-                "level": int(row[3]),
-                "kind": row[4],
-                "parent_id": row[5],
-                "is_active": bool(row[6]),
+                "id": mod["id"],                    # id de nm
+                "code": mod["mod_code"],            # 'IND'|'COL'
+                "name": mod["mod_name"],
+                "level": parent_level + 1,
+                "kind": "OPTION",
+                "parent_id": items[-1]["id"],
+                "is_active": True,
+                "meta": {"is_modalidad": True, "modalidad_code": mod["mod_code"]},
             })
+            continue
+
+        # Si no es nodo ni modalidad conocida
+        raise ValueError(f"id inválido: {pid}")
+
     return items
 
 
@@ -82,22 +141,43 @@ def _allowed_modalities(node_id: Any) -> List[str]:
 def validate_path_and_modalidades(path_ids: List[Any], modalidades: Optional[List[str]]) -> Dict[str, Any]:
     """
     Reglas:
-      - Mínimo nivel 3 (RAMO).
-      - Padre→hijo consistente.
-      - Si la hoja tiene modalidades publicadas → exigir al menos una y que pertenezcan al set permitido.
+      - Padre→hijo consistente (el último puede ser una modalidad virtual OPTION).
+      - Ya NO hay mínimo de nivel (permite ramos válidos en L2).
+      - Si la hoja es modalidad virtual → se infiere automáticamente la modalidad.
+      - Si la hoja es un RAMO con modalidades publicadas → exigir IND/COL.
     """
     items = _fetch_nodes_in_order(path_ids)
 
-    # padre→hijo
+    # padre→hijo (solo entre nodos reales; la modalidad virtual se validó al insertar)
     for i in range(1, len(items)):
+        # si current es virtual modalidad, ya verificamos el padre arriba
+        if items[i].get("meta", {}).get("is_modalidad"):
+            continue
         if str(items[i]["parent_id"]) != str(items[i - 1]["id"]):
-            raise ValueError("El path no respeta la jerarquía padre→hijo. (400.PATH_BROKEN)")
+            raise ValueError(
+                "El path no respeta la jerarquía padre→hijo. (400.PATH_BROKEN)")
 
     leaf = items[-1]
-    last_level = int(leaf["level"])
-    if last_level < 3:
-        raise ValueError("Debes llegar al menos al Nivel 3 (Ramo actuarial). (400.RAMO_MIN_LEVEL)")
 
+    # ¿Leaf es modalidad virtual?
+    if leaf.get("meta", {}).get("is_modalidad"):
+        parent_id = items[-2]["id"]
+        allowed = _allowed_modalities(parent_id)
+        inferred = [leaf["meta"]["modalidad_code"]]
+        if not inferred or any(m not in allowed for m in inferred):
+            raise ValueError(
+                "Modalidad no permitida para este ramo. (400.MODALITY_NOT_ALLOWED)")
+        return {
+            "ok": True,
+            "leaf": {"id": leaf["id"], "code": leaf["code"], "name": leaf["name"], "level": leaf["level"], "kind": leaf["kind"]},
+            "levels": [it.get("level") for it in items],
+            "codes": [it.get("code") for it in items],
+            "requires_modalidad": True,
+            "allowed_modalidades": allowed,
+            "modalidades": inferred,
+        }
+
+    # Si leaf es un nodo real
     requires_mod = _leaf_requires_modalities(leaf["id"])
     allowed = _allowed_modalities(leaf["id"]) if requires_mod else []
 
@@ -109,16 +189,18 @@ def validate_path_and_modalidades(path_ids: List[Any], modalidades: Optional[Lis
 
     if requires_mod:
         if not modalidades_in:
-            raise ValueError("Selecciona al menos una modalidad (IND/COL). (400.MODALITY_REQUIRED)")
+            raise ValueError(
+                "Selecciona al menos una modalidad (IND/COL). (400.MODALITY_REQUIRED)")
         not_allowed = [m for m in modalidades_in if m not in allowed]
         if not_allowed:
-            raise ValueError(f"Modalidades no permitidas para este ramo: {', '.join(not_allowed)} (400.MODALITY_NOT_ALLOWED)")
+            raise ValueError(
+                f"Modalidades no permitidas para este ramo: {', '.join(not_allowed)} (400.MODALITY_NOT_ALLOWED)")
 
     return {
         "ok": True,
         "leaf": {"id": leaf["id"], "code": leaf["code"], "name": leaf["name"], "level": leaf["level"], "kind": leaf["kind"]},
-        "levels": [it["level"] for it in items],
-        "codes": [it["code"] for it in items],
+        "levels": [it.get("level") for it in items],
+        "codes": [it.get("code") for it in items],
         "requires_modalidad": requires_mod,
         "allowed_modalidades": allowed,
         "modalidades": modalidades_in or None,

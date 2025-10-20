@@ -4,8 +4,7 @@ from django.db import connection
 import re
 import uuid
 
-# Acepta UUID con o sin guiones (32 o 36 chars)
-UUID_RX = re.compile(r"^[0-9a-fA-F-]{32,36}$")
+UUID_RX = re.compile(r"^[0-9a-fA-F-]{36}$")
 
 
 def _ensure_uuid(u: Any) -> str:
