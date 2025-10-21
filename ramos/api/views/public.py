@@ -60,25 +60,35 @@ class RamosChildrenView(APIView):
     operation_id="ramos_tree",
     parameters=[
         OpenApiParameter("depth", int, required=False,
-                         description="Profundidad máxima (default 3)."),
+                         description="Profundidad máxima (default 4)."),
         OpenApiParameter("limit", int, required=False,
-                         description="Máximo de raíces a retornar (default 50)."),
+                         description="(Ignorado si presented=true)."),
+        OpenApiParameter("presented", bool, required=False,
+                         description="Usar raíces presentadas (default true)."),
     ],
-    responses={200: OpenApiResponse(
-        description="Árbol ligero hasta depth (con modalidades inyectadas en hojas)")},
+    responses={200: OpenApiResponse(description="Árbol ligero hasta depth")},
 )
 class RamosTreeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
         try:
-            depth = int(request.GET.get("depth") or 3)
+            depth = int(request.GET.get("depth") or 4)
             limit = int(request.GET.get("limit") or 50)
+            presented = (str(request.GET.get("presented")
+                         or "true").lower() != "false")
         except Exception:
             return Response({"code": "400.PARAMS_INVALID", "detail": "depth/limit deben ser enteros."}, status=400)
-        if depth < 1 or depth > 5:
-            return Response({"code": "400.DEPTH_RANGE", "detail": "depth debe estar entre 1 y 5."}, status=400)
-        data = get_tree(depth=depth, limit=limit)
+
+        if depth < 1 or depth > 6:
+            return Response({"code": "400.DEPTH_RANGE", "detail": "depth debe estar entre 1 y 6."}, status=400)
+
+        # Puente SR: si no hay company_id, no se filtra (perfil general ve todo).
+        # Cuando tengas multi-empresa, cambia esta línea para leerlo del request.user / token.
+        company_id = getattr(request.user, "company_id", None)
+
+        data = get_tree(depth=depth, limit=limit,
+                        company_id=company_id, presented=presented)
         return Response({"roots": data})
 
 
