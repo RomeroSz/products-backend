@@ -9,6 +9,8 @@ from ramos.api.services.tree_service import get_roots, get_children, get_tree
 from ramos.api.services.validation_service import validate_path_and_modalidades
 from ramos.api.services.modalidad_service import list_modalidades_for_node
 from ramos.api.services.contable_service import resolve_contables_for_node
+from ramos.api.services.commission_service import get_commission_cap  # Usamos el servicio para obtener el cálculo de comisión
+
 
 PATH_IDS_SCHEMA = {
     "type": "object",
@@ -144,3 +146,18 @@ class RamosContablesView(APIView):
         except ValueError as e:
             return Response({"code": "404.RAMO_NOT_FOUND", "detail": str(e)}, status=404)
         return Response(payload)
+
+@extend_schema(
+    tags=["Ramos · Público"],
+    operation_id="ramos_commission_cap",
+    responses={200: OpenApiResponse(description="Tope de comisión consolidado")}
+)
+class CommissionCapView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        ramo_ids = request.data.get("ramo_ids")
+        modalidad_id = request.data.get("modalidad_id", None)
+
+        commission_data = get_commission_cap(ramo_ids, modalidad_id)
+        return Response(commission_data)

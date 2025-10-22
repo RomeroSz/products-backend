@@ -3,6 +3,7 @@ from django.urls import path
 
 # Public
 from ramos.api.views.public import (
+    CommissionCapView,
     RamosRootsView,
     RamosChildrenView,
     RamosTreeView,
@@ -44,4 +45,6 @@ urlpatterns = [
          name="admin-contable-mapping-bulk"),
     path("admin/contable/audit/unmapped/", AdminContableAuditUnmappedView.as_view(),
          name="admin-contable-audit-unmapped"),
+     path('commission/cap/', CommissionCapView.as_view(), name='commission-cap'),
+
 ]
