@@ -10,8 +10,11 @@ from ramos.api.services.tree_service import get_roots, get_children, get_tree
 from ramos.api.services.validation_service import validate_path_and_modalidades
 from ramos.api.services.modalidad_service import list_modalidades_for_node
 from ramos.api.services.contable_service import resolve_contables_for_node
-from ramos.api.services.commission_service import compute_commission_from_paths, get_commission_cap, validate_ra_selection
-
+from ramos.api.services.commission_service import (
+    compute_commission_from_paths,
+    get_commission_cap,
+    validate_ra_selection,
+)
 
 PATH_IDS_SCHEMA = {
     "type": "object",
@@ -86,10 +89,7 @@ class RamosTreeView(APIView):
         if depth < 1 or depth > 6:
             return Response({"code": "400.DEPTH_RANGE", "detail": "depth debe estar entre 1 y 6."}, status=400)
 
-        # Puente SR: si no hay company_id, no se filtra (perfil general ve todo).
-        # Cuando tengas multi-empresa, cambia esta línea para leerlo del request.user / token.
         company_id = getattr(request.user, "company_id", None)
-
         data = get_tree(depth=depth, limit=limit,
                         company_id=company_id, presented=presented)
         return Response({"roots": data})
@@ -158,19 +158,18 @@ class RamosContablesView(APIView):
                 {"type": "object", "properties": {"pathIds": {"type": "array",
                                                               "items": {"type": "string"}}}, "required": ["pathIds"]},
                 {"type": "object", "properties": {"paths": {"type": "array", "items": {
-                    "type": "array", "items": {"type": "string"}}}}, "required": ["paths"]}
+                    "type": "array", "items": {"type": "string"}}}}, "required": ["paths"]},
             ]
         }
     },
     responses={200: OpenApiResponse(
-        description="Marca si el path pertenece a Vida")}
+        description="Marca si el path pertenece a Vida")},
 )
 class IsVidaPathView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         body = request.data or {}
-        # admite 1 o N
         if "pathIds" in body:
             paths = [body.get("pathIds") or []]
         else:
@@ -199,7 +198,7 @@ class IsVidaPathView(APIView):
     request={
         "application/json": {
             "oneOf": [
-                # NUEVO payload: { main: string[][], annex?: (string[][] | {pathIds:string[]}[][]) }
+                # NUEVO payload trayectorias
                 {
                     "type": "object",
                     "properties": {
@@ -221,7 +220,7 @@ class IsVidaPathView(APIView):
                     },
                     "required": ["main"]
                 },
-                # Legacy payload: { ramo_ids: string[], modalidad_id?: string }
+                # Legacy
                 {
                     "type": "object",
                     "properties": {
@@ -242,7 +241,7 @@ class CommissionCapView(APIView):
     def post(self, request):
         body = request.data or {}
 
-        # --- Ruta NUEVA: payload por trayectorias ---
+        # Nuevo: trayectorias
         if "main" in body or "annex" in body:
             try:
                 result = compute_commission_from_paths(body)
@@ -250,7 +249,7 @@ class CommissionCapView(APIView):
                 return Response({"code": "400.VALIDATION", "detail": str(e)}, status=400)
             return Response(result)
 
-        # --- Compat: payload legacy (lista de ramos + modalidad opcional) ---
+        # Legacy:
         ramo_ids = body.get("ramo_ids")
         modalidad_id = body.get("modalidad_id", None)
         if not isinstance(ramo_ids, list) or len(ramo_ids) == 0:
@@ -264,49 +263,35 @@ class CommissionCapView(APIView):
     tags=["Ramos · Público"],
     operation_id="ramos_commission_validate_ra",
     request={
-        "type": "object",
-        "properties": {
-            "ra_kind": {"type": "string", "enum": ["MAIN", "ANNEX"]},
-            "commission_percent": {"type": "number"},
-            "main": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}, "nullable": True},
-            "annex": {
-                "type": "array",
-                "items": {
-                    "oneOf": [
-                        {"type": "array", "items": {"type": "string"}},
-                        {"type": "array", "items": {
-                            "type": "object",
-                            "properties": {"pathIds": {"type": "array", "items": {"type": "string"}}},
-                            "required": ["pathIds"]
-                        }}
-                    ]
-                },
-                "nullable": True
-            }
-        },
-        "required": ["ra_kind", "commission_percent"]
+        "application/json": {
+            "type": "object",
+            "properties": {
+                "ra_kind": {"type": "string", "enum": ["MAIN", "ANNEX"]},
+                "commission_percent": {"type": "number", "minimum": 0, "maximum": 100},
+                "main": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}, "nullable": True},
+                "annex": {
+                    "type": "array",
+                    "items": {
+                        "oneOf": [
+                            {"type": "array", "items": {"type": "string"}},
+                            {"type": "array", "items": {
+                                "type": "object",
+                                "properties": {"pathIds": {"type": "array", "items": {"type": "string"}}},
+                                "required": ["pathIds"]
+                            }}
+                        ]
+                    },
+                    "nullable": True
+                }
+            },
+            "required": ["ra_kind", "commission_percent"]
+        }
     },
-    responses={
-        200: OpenApiResponse(description="Validación de selección RA y comisión (ok|errors)"),
-        400: OpenApiResponse(description="Errores de payload/normalización"),
-    },
-)
+    responses={200: OpenApiResponse(description="Valida selección RA y % comisión contra topes")})
 class CommissionValidateRAView(APIView):
-    """
-    Valida una selección de RA:
-      - Exclusividad: RA MAIN no puede tener anexos; RA ANNEX no puede tener CP.
-      - RA ANNEX: exactamente un anexo.
-      - Modalidades múltiples en MAIN → requiere RA por modalidad.
-      - Comisión digitada debe estar ≤ tope correspondiente.
-    """
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        body = request.data or {}
-        try:
-            result = validate_ra_selection(body)
-        except ValueError as e:
-            # Defensive: _normalize_paths_payload ya retorna BAD_PAYLOAD con ok:false, pero por si acaso.
-            return Response({"ok": False, "errors": [{"code": "BAD_PAYLOAD", "message": str(e)}]}, status=400)
-        # Business errors vienen en {ok:false, errors:[...]} con 200
+        payload = request.data or {}
+        result = validate_ra_selection(payload)
         return Response(result)
