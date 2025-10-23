@@ -106,62 +106,146 @@ def _is_vida_path(path_ids: List[str]) -> bool:
     return any(_looks_like_vida(n) for n in chain)
 
 
-def _query_commission_percent_by_node(node_id: str) -> Optional[float]:
+def _query_commission_percent_by_node(node_id: str, modality: Optional[str] = None) -> Optional[float]:
     """
-    Busca MIN(FIXED_PERCENT) para ese node_id, ignorando modalidad (seguro).
+    Busca MIN(FIXED_PERCENT) para ese node_id, filtrando por modalidad si se provee.
+
+    Implementa fallback:
+    1. Busca regla con 'modality' específica.
+    2. Si no encuentra, busca regla 'general' (sin 'modality' o con 'modality' null).
     """
-    sql = """
-    SELECT MIN((rule_value->>'percent')::numeric) AS pct
-    FROM ramo.commission_rule
-    WHERE node_id = %s AND rule_type = 'FIXED_PERCENT'
-    """
-    with connection.cursor() as cur:
-        cur.execute(sql, [node_id])
-        row = cur.fetchone()
-    return float(row[0]) if row and row[0] is not None else None
+
+    def fetch(specific_modality: Optional[str]) -> Optional[float]:
+        sql_parts = [
+            "SELECT MIN((rule_value->>'percent')::numeric) AS pct",
+            "FROM ramo.commission_rule",
+            "WHERE node_id = %s AND rule_type = 'FIXED_PERCENT'"
+        ]
+        params: List[Any] = [node_id]
+
+        if specific_modality:
+            # 1. Busca regla específica
+            # Asume que la modalidad está en el JSON: rule_value -> 'modality'
+            # Normalizamos a UPPER para consistencia
+            sql_parts.append("AND UPPER(rule_value->>'modality') = UPPER(%s)")
+            params.append(specific_modality)
+        else:
+            # 2. Busca regla general (sin clave 'modality' o con valor null)
+            sql_parts.append(
+                "AND (rule_value->>'modality' IS NULL OR NOT (rule_value ? 'modality'))")
+
+        sql = " ".join(sql_parts)
+
+        with connection.cursor() as cur:
+            cur.execute(sql, params)
+            row = cur.fetchone()
+
+        return float(row[0]) if row and row[0] is not None else None
+
+    pct = None
+    if modality:
+        # Intenta buscar la modalidad específica primero
+        pct = fetch(specific_modality=modality)
+
+    if pct is None:
+        # Si no se encontró (o no se proveyó modalidad), busca la general
+        pct = fetch(specific_modality=None)
+
+    return pct
 
 
 def commission_percent_for_path(path_ids: List[str]) -> Dict[str, Any]:
     """
-    Unidad de trabajo:
+    Unidad de trabajo (Ahora deriva 'modality' del path):
       - Valida path
       - Usa is_vida_by_path() -> si es VIDA: skip
-      - Consulta % en el LEAF (último id). Si no hay, sube por la cadena (leaf→root)
-        probando cada node_id hasta encontrar un FIXED_PERCENT.
+      - Revisa el LEAF para derivar la modalidad (ej: "Individual", "Colectivo").
+      - Si es un leaf de modalidad, la búsqueda de comisión EMPIEZA en el PADRE (el Ramo).
+      - Consulta % en el nodo de inicio. Si no hay, sube por la cadena (leaf→root)
+        probando cada node_id hasta encontrar un FIXED_PERCENT (filtrando por la modalidad derivada).
     """
     if not path_ids or not isinstance(path_ids, list):
         return {"pathIds": path_ids, "percent": None, "skipped": "PATH_EMPTY"}
 
-    # Leaf (validado)
+    # --- 1. Chequeo de VIDA (usa el leaf original) ---
     leaf_id = _ensure_uuid(path_ids[-1])
-
-    # VIDA?
     try:
         is_vida, _ramo_hint = is_vida_by_path(path_ids)
     except ValueError as e:
         return {"pathIds": path_ids, "percent": None, "error": str(e)}
 
     if is_vida:
+        # La regla de negocio de 'main' omite VIDA
         return {"pathIds": path_ids, "percent": None, "skipped": "VIDA"}
 
-    # 1) Intento en el LEAF directamente (tu caso: OPTION con regla propia)
-    pct = _query_commission_percent_by_node(leaf_id)
+    # --- 2. Derivación de Modalidad (Heurística del Frontend) ---
+    modality: Optional[str] = None
+    modality_derived_from = None
+    node_to_start_search = leaf_id  # Por defecto, buscamos desde el leaf
+
+    # Necesitamos los datos del leaf (name, kind, parent_id)
+    # _fetch_nodes es ligero y ya lo tenemos en este servicio.
+    leaf_node_data = _fetch_nodes([leaf_id]).get(leaf_id)
+
+    if leaf_node_data:
+        leaf_name = (leaf_node_data.get('name') or '').strip().upper()
+        leaf_kind = (leaf_node_data.get('kind') or '').upper()
+
+        # Replicamos la lógica de RamoAccordion.tsx
+        if leaf_kind == 'OPTION':
+            if leaf_name == 'INDIVIDUAL':
+                modality = 'INDIVIDUAL'
+            elif leaf_name == 'COLECTIVO':
+                modality = 'COLECTIVO'
+            elif leaf_name == 'COLECTIVO O FLOTA':
+                modality = 'FLOTA'  # O 'COLECTIVO', ajusta según tu regla de negocio
+            # ... (puedes añadir más mapeos si es necesario)
+
+        # Si encontramos una modalidad, la regla se aplica en el PADRE (el Ramo)
+        if modality:
+            parent_id = leaf_node_data.get('parent_id')
+            if parent_id:
+                node_to_start_search = parent_id  # Empezar a buscar desde el Ramo
+                modality_derived_from = f"leaf_option:{leaf_id}"
+            else:
+                # Es un nodo 'OPTION' modal pero sin padre? Raro, pero seguimos
+                # buscando desde el leaf, pero con la modalidad.
+                modality_derived_from = f"leaf_option_no_parent:{leaf_id}"
+
+    # --- 3. Búsqueda de Comisión (con modalidad y nodo de inicio correctos) ---
+
+    # 3a) Intento en el NODO DE INICIO (sea el leaf, o el padre si era modal)
+    pct = _query_commission_percent_by_node(
+        node_to_start_search, modality=modality)
     if isinstance(pct, (int, float)):
-        return {"pathIds": path_ids, "percent": pct, "node_id": leaf_id}
+        return {
+            "pathIds": path_ids,
+            "percent": pct,
+            "node_id": node_to_start_search,
+            "modality_derived": modality
+        }
 
-    # 2) Si no hay en el leaf, subimos por el chain y probamos cada ancestro (primer match)
-    chain = _fetch_chain_up(leaf_id)  # leaf -> root
-    for n in chain[1:]:  # ya probamos chain[0] (leaf)
+    # 3b) Si no hay, subimos por el chain (desde el nodo de inicio)
+    chain = _fetch_chain_up(node_to_start_search)
+
+    # El 'chain[0]' ya lo probamos arriba (node_to_start_search).
+    # Empezamos desde el 'chain[1]' (el padre del nodo de inicio).
+    for n in chain[1:]:
         nid = str(n["id"])
-        pct_up = _query_commission_percent_by_node(nid)
+        pct_up = _query_commission_percent_by_node(nid, modality=modality)
         if isinstance(pct_up, (int, float)):
-            return {"pathIds": path_ids, "percent": pct_up, "node_id": nid}
+            return {
+                "pathIds": path_ids,
+                "percent": pct_up,
+                "node_id": nid,
+                "modality_derived": modality
+            }
 
-    # 3) No hay regla en ningún nivel
-    return {"pathIds": path_ids, "percent": None}
-
+    # 3c) No hay regla en ningún nivel
+    return {"pathIds": path_ids, "percent": None, "modality_derived": modality}
 
 # ---------------- NUEVO (por trayectorias) ----------------
+
 
 def _normalize_paths_payload(body: Dict[str, Any]) -> Tuple[List[List[str]], List[List[str]]]:
     """
@@ -339,7 +423,8 @@ def compute_commission_from_paths(body: Dict[str, Any]) -> Dict[str, Any]:
         "main": {
             "cap_percent": main_cap,
             # Limpiamos la respuesta de main (no necesita 'original_percent' etc.)
-            "items": [{"pathIds": it["pathIds"], "percent": it.get("percent"), "skipped": it.get("skipped")} for it in main_items_raw],
+            "items": [{"pathIds": it["pathIds"], "percent": it.get("percent"), "skipped": it.get("skipped"), "modality_derived": it.get("modality_derived"), "node_id": it.get("node_id")}
+                      for it in main_items_raw],
         },
         "annex": {
             # El cap de anexos ahora SÍ respeta el tope de main
@@ -348,6 +433,122 @@ def compute_commission_from_paths(body: Dict[str, Any]) -> Dict[str, Any]:
             "capped_by_main_percent": main_cap if can_cap_annex else None
         },
     }
+
+
+def validate_ra_selection(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    payload = {
+      "main": string[][],          # paths de CP seleccionadas para este RA (si RA de CP)
+      "annex": string[][],         # paths de Annex seleccionados para este RA (si RA de Annex)
+      "ra_kind": "MAIN"|"ANNEX",   # obliga la exclusividad
+      "commission_percent": float  # 0..100 ingresado por usuario
+    }
+    """
+    # --- 1) Normalización + exclusividad básica ---
+    main = payload.get("main") or []
+    annex = payload.get("annex") or []
+    ra_kind = (payload.get("ra_kind") or "").upper()
+    try:
+        main_paths, annex_paths = _normalize_paths_payload(
+            {"main": main, "annex": annex})
+    except ValueError as e:
+        return {"ok": False, "errors": [{"code": "BAD_PAYLOAD", "message": str(e)}]}
+
+    if ra_kind not in ("MAIN", "ANNEX"):
+        return {"ok": False, "errors": [{"code": "KIND_REQUIRED", "message": "ra_kind debe ser MAIN o ANNEX."}]}
+
+    if ra_kind == "MAIN":
+        if annex_paths:
+            return {"ok": False, "errors": [{"code": "EXCLUSIVE_MAIN", "message": "Un RA de Condiciones Particulares no puede vincular anexos."}]}
+        if not main_paths:
+            return {"ok": False, "errors": [{"code": "EMPTY_MAIN", "message": "Debe vincular al menos un ramo principal."}]}
+    else:  # ANNEX
+        if main_paths:
+            return {"ok": False, "errors": [{"code": "EXCLUSIVE_ANNEX", "message": "Un RA de Anexo no puede vincular ramos principales."}]}
+        if not annex_paths:
+            return {"ok": False, "errors": [{"code": "EMPTY_ANNEX", "message": "Debe vincular un anexo."}]}
+        if len(annex_paths) != 1:
+            return {"ok": False, "errors": [{"code": "ONE_ANNEX_ONLY", "message": "Cada RA de Anexo debe vincular exactamente un anexo."}]}
+
+    # --- 2) Cálculo de caps con tu servicio actual ---
+    calc = compute_commission_from_paths(
+        {"main": main_paths, "annex": annex_paths})
+    if not calc.get("ok"):
+        return {"ok": False, "errors": [{"code": "COMPUTE_FAIL", "message": "Fallo al calcular topes."}]}
+
+    commission_input = float(payload.get("commission_percent") or 0.0)
+    if commission_input < 0 or commission_input > 100:
+        return {"ok": False, "errors": [{"code": "COMMISSION_RANGE", "message": "La comisión debe estar entre 0% y 100%."}]}
+
+    errors = []
+
+    # --- 3) Reglas por tipo de RA ---
+    if ra_kind == "MAIN":
+        # 3.a) Modalidad: si hay más de una modalidad derivada en los paths → error (split requerido)
+        main_items = calc.get("main", {}).get("items", []) or []
+        # modalidades no nulas (si no hubo OPTION modal, modality_derived es None)
+        modalities = {it.get("modality_derived")
+                      for it in main_items if it.get("modality_derived")}
+        if len(modalities) > 1:
+            # opcional: devolver guía por modalidad con su cap individual (todas comparten el mismo cap=min)
+            return {
+                "ok": False,
+                "errors": [{
+                    "code": "SPLIT_BY_MODALITY",
+                    "message": "Seleccionó múltiples modalidades (p.ej. Individual y Colectivo). Debe crear un RA por modalidad."
+                }],
+                "caps": {
+                    "main_cap_percent": calc.get("main", {}).get("cap_percent")
+                }
+            }
+
+        # 3.b) Validar comisión digitada contra cap de main
+        main_cap = calc.get("main", {}).get("cap_percent")
+        if main_cap is None:
+            errors.append({
+                "code": "MAIN_NO_CAP",
+                "message": "No se pudo determinar tope de comisión para los ramos seleccionados (CP)."
+            })
+        else:
+            # permite 0-1 o 0-100 en DB
+            if commission_input > (main_cap * 100.0 if main_cap <= 1 else main_cap):
+                top = (main_cap * 100.0) if main_cap <= 1 else main_cap
+                errors.append({
+                    "code": "MAIN_CAP_EXCEEDED",
+                    "message": f"La comisión ({commission_input:.2f}%) excede el tope para CP ({top:.2f}%)."
+                })
+
+    else:  # ANNEX
+        # 3.c) Validar comisión digitada contra el único anexo (ya topeado por main en compute)
+        annex_block = calc.get("annex", {}) or {}
+        items = annex_block.get("items", []) or []
+        if not items:
+            errors.append(
+                {"code": "ANNEX_NO_ITEM", "message": "No se pudo determinar comisión del anexo."})
+        else:
+            ann = items[0]
+            ann_pct = ann.get("percent")
+            if ann_pct is None:
+                errors.append(
+                    {"code": "ANNEX_NO_CAP", "message": "El anexo no posee regla de comisión."})
+            else:
+                # ann_pct viene posiblemente en 0..1; normalicemos como en main
+                ann_top = (ann_pct * 100.0) if ann_pct <= 1 else ann_pct
+                if commission_input > ann_top:
+                    errors.append({
+                        "code": "ANNEX_CAP_EXCEEDED",
+                        "message": f"La comisión ({commission_input:.2f}%) excede el tope del anexo ({ann_top:.2f}%)."
+                    })
+
+    return {
+        "ok": len(errors) == 0,
+        "errors": errors if errors else None,
+        "caps": {
+            "main_cap_percent": calc.get("main", {}).get("cap_percent"),
+            "annex_cap_percent": calc.get("annex", {}).get("cap_percent"),
+        }
+    }
+
 # ---------------- LEGACY (si aún lo usas) ----------------
 
 
