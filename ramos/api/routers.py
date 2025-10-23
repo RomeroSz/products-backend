@@ -4,6 +4,7 @@ from django.urls import path
 # Public
 from ramos.api.views.public import (
     CommissionCapView,
+    IsVidaPathView,
     RamosRootsView,
     RamosChildrenView,
     RamosTreeView,
@@ -26,6 +27,9 @@ urlpatterns = [
     path("ramos/roots/", RamosRootsView.as_view(), name="ramos-roots"),
     path("ramos/children/", RamosChildrenView.as_view(), name="ramos-children"),
     path("ramos/tree/", RamosTreeView.as_view(), name="ramos-tree"),
+    
+     path("ramos/is-vida/", IsVidaPathView.as_view(), name="ramos-is-vida"),
+
 
     path("ramos/validate-path/", RamosValidatePathView.as_view(),
          name="ramos-validate-path"),
@@ -46,5 +50,4 @@ urlpatterns = [
     path("admin/contable/audit/unmapped/", AdminContableAuditUnmappedView.as_view(),
          name="admin-contable-audit-unmapped"),
      path('commission/cap/', CommissionCapView.as_view(), name='commission-cap'),
-
 ]

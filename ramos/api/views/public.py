@@ -5,11 +5,12 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema, OpenApiResponse, OpenApiParameter
 
+from ramos.api.services.ramos_flags_service import is_vida_by_path
 from ramos.api.services.tree_service import get_roots, get_children, get_tree
 from ramos.api.services.validation_service import validate_path_and_modalidades
 from ramos.api.services.modalidad_service import list_modalidades_for_node
 from ramos.api.services.contable_service import resolve_contables_for_node
-from ramos.api.services.commission_service import get_commission_cap  # Usamos el servicio para obtener el cálculo de comisión
+from ramos.api.services.commission_service import compute_commission_from_paths, get_commission_cap
 
 
 PATH_IDS_SCHEMA = {
@@ -149,15 +150,105 @@ class RamosContablesView(APIView):
 
 @extend_schema(
     tags=["Ramos · Público"],
+    operation_id="ramos_is_vida",
+    request={
+        "application/json": {
+            "oneOf": [
+                { "type": "object", "properties": { "pathIds": { "type": "array", "items": {"type":"string"} } }, "required": ["pathIds"] },
+                { "type": "object", "properties": { "paths": { "type": "array", "items": { "type":"array", "items":{"type":"string"} } } }, "required": ["paths"] }
+            ]
+        }
+    },
+    responses={200: OpenApiResponse(description="Marca si el path pertenece a Vida")}
+)
+class IsVidaPathView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        body = request.data or {}
+        # admite 1 o N
+        if "pathIds" in body:
+            paths = [body.get("pathIds") or []]
+        else:
+            paths = body.get("paths") or []
+        if not isinstance(paths, list) or not all(isinstance(p, list) for p in paths):
+            return Response({"detail": "paths / pathIds inválido"}, status=400)
+
+        out = []
+        for p in paths:
+            try:
+                ok, ramo = is_vida_by_path(p)
+                out.append({
+                    "pathIds": p,
+                    "is_vida": ok,
+                    "ramo": ramo and {"id": ramo["id"], "code": ramo["code"], "name": ramo["name"]} or None
+                })
+            except ValueError as e:
+                out.append({"pathIds": p, "is_vida": False, "error": str(e)})
+
+        return Response({"results": out})
+
+@extend_schema(
+    tags=["Ramos · Público"],
     operation_id="ramos_commission_cap",
+    request={
+        "application/json": {
+            "oneOf": [
+                # NUEVO payload: { main: string[][], annex?: (string[][] | {pathIds:string[]}[][]) }
+                {
+                    "type": "object",
+                    "properties": {
+                        "main": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
+                        "annex": {
+                            "type": "array",
+                            "items": {
+                                "oneOf": [
+                                    {"type": "array", "items": {"type": "string"}},
+                                    {"type": "array", "items": {
+                                        "type": "object",
+                                        "properties": {"pathIds": {"type": "array", "items": {"type": "string"}}},
+                                        "required": ["pathIds"]
+                                    }}
+                                ]
+                            },
+                            "nullable": True
+                        }
+                    },
+                    "required": ["main"]
+                },
+                # Legacy payload: { ramo_ids: string[], modalidad_id?: string }
+                {
+                    "type": "object",
+                    "properties": {
+                        "ramo_ids": {"type": "array", "items": {"type": "string"}},
+                        "modalidad_id": {"type": "string", "nullable": True}
+                    },
+                    "required": ["ramo_ids"]
+                }
+            ]
+        }
+    },
     responses={200: OpenApiResponse(description="Tope de comisión consolidado")}
 )
 class CommissionCapView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        ramo_ids = request.data.get("ramo_ids")
-        modalidad_id = request.data.get("modalidad_id", None)
+        body = request.data or {}
+
+        # --- Ruta NUEVA: payload por trayectorias ---
+        if "main" in body or "annex" in body:
+            try:
+                result = compute_commission_from_paths(body)
+            except ValueError as e:
+                return Response({"code": "400.VALIDATION", "detail": str(e)}, status=400)
+            return Response(result)
+
+        # --- Compat: payload legacy (lista de ramos + modalidad opcional) ---
+        ramo_ids = body.get("ramo_ids")
+        modalidad_id = body.get("modalidad_id", None)
+        if not isinstance(ramo_ids, list) or len(ramo_ids) == 0:
+            return Response({"code": "400.MISSING", "detail": "ramo_ids requerido."}, status=400)
 
         commission_data = get_commission_cap(ramo_ids, modalidad_id)
         return Response(commission_data)
