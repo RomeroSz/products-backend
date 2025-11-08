@@ -3,8 +3,6 @@ from django.urls import path
 
 # Public
 from ramos.api.views.public import (
-    CommissionCapView,
-    CommissionValidateRAView,
     IsVidaPathView,
     RamosRootsView,
     RamosChildrenView,
@@ -13,6 +11,7 @@ from ramos.api.views.public import (
     RamosModalidadesView,
     RamosContablesView,
 )
+from ramos.api.views.selection import SelectionPreviewView  # <- NUEVO
 
 # Admin · Contable
 from ramos.api.views.admin_contable import (
@@ -34,9 +33,8 @@ urlpatterns = [
     path("ramos/<uuid:node_id>/modalidades/", RamosModalidadesView.as_view(), name="ramos-modalidades"),
     path("ramos/<uuid:node_id>/contables/", RamosContablesView.as_view(), name="ramos-contables"),
 
-    # Comisión
-    path("commission/cap/", CommissionCapView.as_view(), name="commission-cap"),
-    path("commission/validate/", CommissionValidateRAView.as_view(), name="commission-validate"),
+    # Selección (preview)  ← NUEVO
+    path("ramos/selection/preview/", SelectionPreviewView.as_view(), name="ramos-selection-preview"),
 
     # Admin · Contable
     path("admin/contable/mapping/", AdminContableMappingListView.as_view(), name="admin-contable-mapping-list"),

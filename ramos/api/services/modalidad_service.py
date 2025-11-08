@@ -1,22 +1,16 @@
 # products-backend/ramos/api/services/modalidad_service.py
 from typing import Dict, Any, List
 from django.db import connection
-import re
-import uuid
+import re, uuid
 
 UUID_RX = re.compile(r"^[0-9a-fA-F-]{36}$")
 
-
 def _ensure_uuid(u: Any) -> str:
-    """
-    Acepta uuid.UUID o str; normaliza a str (canónica) y valida formato.
-    """
     if isinstance(u, uuid.UUID):
         u = str(u)
     if not isinstance(u, str) or not UUID_RX.match(u.strip()):
         raise ValueError("UUID inválido.")
     return u.strip()
-
 
 def _fetch_node(node_id: Any) -> Dict[str, Any]:
     node_id = _ensure_uuid(node_id)
@@ -28,11 +22,9 @@ def _fetch_node(node_id: Any) -> Dict[str, Any]:
         raise ValueError("Nodo inexistente o inactivo.")
     return {"id": row[0], "code": row[1], "name": row[2]}
 
-
 def list_modalidades_for_node(node_id: Any) -> Dict[str, Any]:
     node_id = _ensure_uuid(node_id)
     ramo = _fetch_node(node_id)
-
     sql = """
     SELECT m.id, m.code, m.name, nm.attrs
     FROM ramo.node_modalidad nm
@@ -52,12 +44,5 @@ def list_modalidades_for_node(node_id: Any) -> Dict[str, Any]:
             label = attrs.get("label_col")
             if isinstance(label, str) and label.strip():
                 display = label.strip()
-
-        modalidades.append({
-            "id": mid,
-            "code": (mcode or "").upper(),
-            "name": mname,
-            "displayName": display
-        })
-
+        modalidades.append({"id": mid, "code": (mcode or "").upper(), "name": mname, "displayName": display})
     return {"node": ramo, "modalidades": modalidades}
